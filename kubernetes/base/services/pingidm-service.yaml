@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pingidm
+  namespace: default
+  labels:
+    app: pingidm
+spec:
+  type: ClusterIP
+  selector:
+    app: pingidm
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 8443
+    targetPort: 8443
+    protocol: TCP

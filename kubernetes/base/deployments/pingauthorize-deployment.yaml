@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pingauthorize
+  namespace: default
+  labels:
+    app: pingauthorize
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pingauthorize
+  template:
+    metadata:
+      labels:
+        app: pingauthorize
+    spec:
+      containers:
+      - name: pingauthorize
+        image: pingidentity/pingauthorize:${PINGAUTHORIZE_VERSION:-8.3.0}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8443
+          name: https
+        - containerPort: 8444
+          name: admin
+        env:
+        - name: PING_IDENTITY_DEVOPS_USER
+          valueFrom:
+            secretKeyRef:
+              name: devops-secret
+              key: username
+        - name: PING_IDENTITY_DEVOPS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: devops-secret
+              key: key
+        - name: SERVER_PROFILE_URL
+          value: "https://github.com/pingidentity/server-profiles.git"
+        - name: SERVER_PROFILE_PATH
+          value: "getting-started/pingauthorize"
+        - name: PING_IDENTITY_DEVOPS_TAG
+          value: "2024.1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: pingauthorize-data
+          mountPath: /opt/out
+        - name: xacml-policies
+          mountPath: /opt/policies
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: pingauthorize-data
+        emptyDir: {}
+      - name: xacml-policies
+        configMap:
+          name: xacml-policies

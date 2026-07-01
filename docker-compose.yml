@@ -42,6 +42,60 @@ services:
     networks:
       - ping-network
 
+  # PingAuthorize - Policy Decision Point
+  pingauthorize:
+    image: pingidentity/pingauthorize:${PINGAUTHORIZE_VERSION:-8.3.0}
+    container_name: pingauthorize
+    environment:
+      PING_IDENTITY_DEVOPS_USER: ${PING_IDENTITY_DEVOPS_USER}
+      PING_IDENTITY_DEVOPS_KEY: ${PING_IDENTITY_DEVOPS_KEY}
+      SERVER_PROFILE_URL: https://github.com/pingidentity/server-profiles.git
+      SERVER_PROFILE_PATH: getting-started/pingauthorize
+      PING_IDENTITY_DEVOPS_TAG: ${PING_IDENTITY_DEVOPS_TAG:-}
+    ports:
+      - "8443:8443"
+      - "8444:8444"
+    depends_on:
+      - pingfederate
+    volumes:
+      - pingauthorize-data:/opt/out
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--insecure", "https://localhost:8443/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PingIDM - Identity Manager
+  pingidm:
+    image: pingidentity/pingidm:${PINGIDM_VERSION:-8.1.0}
+    container_name: pingidm
+    environment:
+      PING_IDENTITY_DEVOPS_USER: ${PING_IDENTITY_DEVOPS_USER}
+      PING_IDENTITY_DEVOPS_KEY: ${PING_IDENTITY_DEVOPS_KEY}
+      SERVER_PROFILE_URL: https://github.com/pingidentity/server-profiles.git
+      SERVER_PROFILE_PATH: getting-started/pingidm
+      PING_IDENTITY_DEVOPS_TAG: ${PING_IDENTITY_DEVOPS_TAG:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4317
+      OTEL_SDK_DISABLED: "false"
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    ports:
+      - "8080:8080"
+      - "8081:8443"
+    depends_on:
+      - pingfederate
+    volumes:
+      - pingidm-data:/opt/out
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Ollama - LLM Backend
   ollama:
     image: ollama/ollama:latest
@@ -137,4 +191,6 @@ networks:
 volumes:
   pingfederate-data:
   pingaccess-data:
+  pingauthorize-data:
+  pingidm-data:
   ollama-data:

@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pingidm
+  namespace: default
+  labels:
+    app: pingidm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pingidm
+  template:
+    metadata:
+      labels:
+        app: pingidm
+    spec:
+      containers:
+      - name: pingidm
+        image: pingidentity/pingidm:${PINGIDM_VERSION:-8.1.0}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8443
+          name: https
+        env:
+        - name: PING_IDENTITY_DEVOPS_USER
+          valueFrom:
+            secretKeyRef:
+              name: devops-secret
+              key: username
+        - name: PING_IDENTITY_DEVOPS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: devops-secret
+              key: key
+        - name: SERVER_PROFILE_URL
+          value: "https://github.com/pingidentity/server-profiles.git"
+        - name: SERVER_PROFILE_PATH
+          value: "getting-started/pingidm"
+        - name: PING_IDENTITY_DEVOPS_TAG
+          value: "2024.1"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://jaeger:4317"
+        - name: OTEL_SDK_DISABLED
+          value: "false"
+        - name: OTEL_TRACES_EXPORTER
+          value: "otlp"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: pingidm-data
+          mountPath: /opt/out
+        - name: pingidm-config
+          mountPath: /opt/config
+          readOnly: true
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: pingidm-data
+        emptyDir: {}
+      - name: pingidm-config
+        configMap:
+          name: pingidm-config

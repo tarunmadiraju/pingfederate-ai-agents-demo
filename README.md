@@ -84,6 +84,8 @@ https://portal-external.localhost/workforce-portal
 ### Core Services
 - ✅ **PingFederate** — OIDC provider
 - ✅ **PingAccess** — BFF + session manager
+- ✅ **PingAuthorize** — Policy Decision Point (XACML authorization)
+- ✅ **PingIDM** — Identity Manager (user registry + attributes)
 - ✅ **PingGateway** — Token exchange + authz enforcement
 - ✅ **Workforce Portal** — Express + Vue.js
 - ✅ **Workforce AI Agent** — Node.js AG-UI server
@@ -103,6 +105,7 @@ https://portal-external.localhost/workforce-portal
 - `MCP_TOOLS_REFERENCE.md` — Tool ecosystem documentation
 - `DEPLOYMENT.md` — Step-by-step deployment guide
 - `ARCHITECTURE.md` — Technical deep-dive
+- `PINGAUTHORIZE_PINGIDM_GUIDE.md` — Advanced authorization & identity management
 
 ---
 

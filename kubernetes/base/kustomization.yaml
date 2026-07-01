@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: ping-ai-agents-base
+  namespace: default
+
+# Include all base manifests
+resources:
+  # Ping Identity Services
+  - deployments/pingauthorize-deployment.yaml
+  - deployments/pingidm-deployment.yaml
+  - services/pingauthorize-service.yaml
+  - services/pingidm-service.yaml
+  - configmaps/xacml-policies.yaml
+  - configmaps/pingidm-config.yaml
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/name: ping-ai-agents
+  app.kubernetes.io/version: "2024.1"
+  managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  description: "Ping AI Agents Demo - Enterprise-ready AI with identity security"
+  documentation: "https://github.com/tarunmadiraju/pingfederate-ai-agents-demo"
+
+# Image prefix for all containers
+images:
+  - name: pingidentity/pingauthorize
+    newTag: "8.3.0"
+  - name: pingidentity/pingidm
+    newTag: "8.1.0"
+
+# Replicas
+replicas:
+  - name: pingauthorize
+    count: 1
+  - name: pingidm
+    count: 1
+
+# Vars for substitution
+vars:
+  - name: PINGAUTHORIZE_VERSION
+    objref:
+      kind: Deployment
+      name: pingauthorize
+      apiVersion: apps/v1
+    fieldref:
+      fieldpath: spec.template.spec.containers[0].image
+  - name: PINGIDM_VERSION
+    objref:
+      kind: Deployment
+      name: pingidm
+      apiVersion: apps/v1
+    fieldref:
+      fieldpath: spec.template.spec.containers[0].image

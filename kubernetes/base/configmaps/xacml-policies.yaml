@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xacml-policies
+  namespace: default
+data:
+  # Agent Access Control Policy
+  agent-access-control.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <PolicySet xmlns="urn:oasis:names:tc:xacml:3.0:core:schema:wd-17"
+               PolicySetId="urn:ping:agent-access-control"
+               PolicyCombiningAlgId="urn:oasis:names:tc:xacml:3.0:policy-combining-algorithm:permit-overrides">
+      
+      <!-- Policy: Workforce AI Agent Access -->
+      <Policy PolicyId="urn:ping:policy:workforce-agent-access"
+              RuleCombiningAlgId="urn:oasis:names:tc:xacml:3.0:rule-combining-algorithm:permit-overrides">
+        <Target>
+          <AnyOf>
+            <AllOf>
+              <Match MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+                <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">workforce-agent</AttributeValue>
+                <ResourceAttributeDesignator ResourceId="" AttributeId="urn:oasis:names:tc:xacml:1.0:resource:resource-id" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Match>
+            </AllOf>
+          </AnyOf>
+        </Target>
+        
+        <Rule RuleId="urn:ping:rule:workforce-access-employees" Effect="Permit">
+          <Target>
+            <AnyOf>
+              <AllOf>
+                <Match MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+                  <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">employee</AttributeValue>
+                  <SubjectAttributeDesignator SubjectCategory="urn:oasis:names:tc:xacml:1.0:subject-category:access-subject" AttributeId="urn:oasis:names:tc:xacml:2.0:subject:role" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+                </Match>
+              </AllOf>
+            </AnyOf>
+          </Target>
+        </Rule>
+        
+        <Rule RuleId="urn:ping:rule:workforce-deny-all" Effect="Deny"/>
+      </Policy>
+      
+      <!-- Policy: Trip Planner Agent Access -->
+      <Policy PolicyId="urn:ping:policy:trip-planner-agent-access"
+              RuleCombiningAlgId="urn:oasis:names:tc:xacml:3.0:rule-combining-algorithm:permit-overrides">
+        <Target>
+          <AnyOf>
+            <AllOf>
+              <Match MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+                <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">trip-planner-agent</AttributeValue>
+                <ResourceAttributeDesignator ResourceId="" AttributeId="urn:oasis:names:tc:xacml:1.0:resource:resource-id" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Match>
+            </AllOf>
+          </AnyOf>
+        </Target>
+        
+        <Rule RuleId="urn:ping:rule:trip-access-all-users" Effect="Permit">
+          <!-- All authenticated users can access trip planner -->
+        </Rule>
+      </Policy>
+      
+      <!-- Policy: MCP Tool Data Access -->
+      <Policy PolicyId="urn:ping:policy:mcp-tool-access"
+              RuleCombiningAlgId="urn:oasis:names:tc:xacml:3.0:rule-combining-algorithm:permit-overrides">
+        <Target>
+          <AnyOf>
+            <AllOf>
+              <Match MatchId="urn:oasis:names:tc:xacml:1.0:function:string-starts-with">
+                <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">mcp:tool</AttributeValue>
+                <ResourceAttributeDesignator ResourceId="" AttributeId="urn:oasis:names:tc:xacml:1.0:resource:resource-id" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Match>
+            </AllOf>
+          </AnyOf>
+        </Target>
+        
+        <Rule RuleId="urn:ping:rule:expense-access-own-expenses" Effect="Permit">
+          <Condition>
+            <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+              <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-one-and-only">
+                <SubjectAttributeDesignator SubjectCategory="urn:oasis:names:tc:xacml:1.0:subject-category:access-subject" AttributeId="urn:oasis:names:tc:xacml:1.0:subject:subject-id" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Apply>
+              <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-one-and-only">
+                <ResourceAttributeDesignator ResourceId="" AttributeId="urn:ping:attribute:user-id" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Apply>
+            </Apply>
+          </Condition>
+        </Rule>
+        
+        <Rule RuleId="urn:ping:rule:finance-access-department" Effect="Permit">
+          <Condition>
+            <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+              <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-one-and-only">
+                <SubjectAttributeDesignator SubjectCategory="urn:oasis:names:tc:xacml:1.0:subject-category:access-subject" AttributeId="urn:oasis:names:tc:xacml:2.0:subject:role" DataType="http://www.w3.org/2001/XMLSchema#string"/>
+              </Apply>
+              <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">finance</AttributeValue>
+            </Apply>
+          </Condition>
+        </Rule>
+      </Policy>
+    </PolicySet>
