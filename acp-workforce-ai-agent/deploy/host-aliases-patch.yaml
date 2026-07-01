@@ -1,0 +1,39 @@
+# host-aliases-patch.yaml — TEMPLATE (not applied directly)
+# Resolves .localhost hostnames inside Alpine/musl pods.
+#
+# Alpine uses musl libc which intercepts *.localhost → 127.0.0.1 (RFC 6761)
+# before querying DNS. hostAliases injects /etc/hosts entries that are checked
+# before that interception, routing traffic to Traefik's ClusterIP instead.
+#
+# This file is a TEMPLATE. render_host_aliases() (lib/deploy.sh) envsubst's it
+# into host-aliases-patch-resolved.yaml at deploy time, and kustomization.yaml
+# references THAT generated file under `patches:`. This bakes hostAliases into
+# the initial `kubectl apply -k` so the workload is created correctly in one
+# rollout — no second rollout from a post-apply `kubectl patch`.
+#
+# Two variables are substituted at deploy time:
+#   ${TRAEFIK_IP}  Traefik ClusterIP (dynamic per cluster)
+#   ${DEPLOY_TS}   per-deploy timestamp → pod-template annotation. Changing it
+#                  on redeploy forces a re-pull of the :latest image, replacing
+#                  the old standalone `kubectl rollout restart` step.
+#
+# Only hostnames actually resolved by containers in this pod:
+#   - pingfed.localhost:     CIBA sidecar → PF CIBA/token endpoints
+#   - pinggateway.localhost: Agent → MCP servers (expense + travel) via path-based routing;
+#                            also CIBA sidecar → upstream (Envoy host rewrite)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acp-workforce-ai-agent
+  namespace: ai-agents
+spec:
+  template:
+    metadata:
+      annotations:
+        acp.deploy/restarted-at: "${DEPLOY_TS}"
+    spec:
+      hostAliases:
+        - ip: "${TRAEFIK_IP}"
+          hostnames:
+            - pingfed.localhost
+            - pinggateway.localhost

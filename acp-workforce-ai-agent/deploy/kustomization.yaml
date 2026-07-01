@@ -1,0 +1,97 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-agents
+
+resources:
+- namespace.yaml
+- serviceaccount.yaml
+- configmap.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+
+components:
+- ../../acp-platform/deploy/otel
+- ../../acp-platform/deploy/registry
+- ../../acp-platform/deploy/identity-sidecar
+
+# Agent main container (Node.js → gRPC port 4317)
+# Authn sidecar init container (Go → HTTP port 4318)
+replacements:
+- source:
+    fieldPath: data.OTEL_GRPC_ENDPOINT
+    kind: ConfigMap
+    name: otel-config
+  targets:
+  - fieldPaths:
+    - data.OTEL_EXPORTER_OTLP_ENDPOINT
+    select:
+      kind: ConfigMap
+      name: acp-workforce-ai-agent-config
+- source:
+    fieldPath: data.OTEL_HTTP_ENDPOINT
+    kind: ConfigMap
+    name: otel-config
+  targets:
+  - fieldPaths:
+    - spec.template.spec.initContainers.[name=authn-sidecar].env.[name=OTEL_EXPORTER_OTLP_ENDPOINT].value
+    select:
+      kind: Deployment
+      name: acp-workforce-ai-agent
+
+configMapGenerator:
+- files:
+  - envoy.yaml
+  name: acp-workforce-ai-agent-envoy-config
+- files:
+  - sidecar-svid-mint.yaml
+  name: acp-workforce-ai-agent-sidecar-svid-mint-config
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+patches:
+# hostAliases (.localhost -> Traefik ClusterIP) baked into apply -k via a
+# deploy-time-generated patch. See host-aliases-patch.yaml (the template) and
+# render_host_aliases() in acp-platform/scripts/lib/deploy.sh. The resolved file
+# is gitignored and regenerated on every deploy.
+- path: host-aliases-patch-resolved.yaml
+  target:
+    kind: Deployment
+    name: acp-workforce-ai-agent
+- target:
+    kind: Deployment
+    name: acp-workforce-ai-agent
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: acp-workforce-ai-agent
+    spec:
+      template:
+        spec:
+          volumes:
+          - name: envoy-config
+            configMap:
+              name: acp-workforce-ai-agent-envoy-config
+          # Redirect the default sidecar-paz-authz-config volume to the
+          # outbound-mint config (same pattern as Trip Planner).
+          # The authn-sidecar --config-path arg is also patched below.
+          - name: sidecar-paz-authz-config
+            configMap:
+              name: acp-workforce-ai-agent-sidecar-svid-mint-config
+          initContainers:
+          - name: iptables-init
+            env:
+            - name: INBOUND_REDIRECT_ENABLED
+              value: "true"
+            - name: OUTBOUND_REDIRECT_ENABLED
+              value: "true"
+          - name: authn-sidecar
+            args:
+            - --config-path
+            - /etc/sidecar/sidecar-svid-mint.yaml
+            env:
+            - name: OTEL_SERVICE_NAME
+              value: "acp-wf-ai-agent-identity-sidecar"

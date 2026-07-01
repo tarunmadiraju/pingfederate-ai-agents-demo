@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: acp-workforce-portal
+
+resources:
+- namespace.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+
+components:
+- ../../acp-platform/deploy/otel
+- ../../acp-platform/deploy/registry
+
+# hostAliases (.localhost -> Traefik ClusterIP) baked into apply -k via a
+# deploy-time-generated patch. See host-aliases-patch.yaml (the template) and
+# render_host_aliases() in acp-platform/scripts/lib/deploy.sh. The resolved file
+# is gitignored and regenerated on every deploy.
+patches:
+- path: host-aliases-patch-resolved.yaml
+  target:
+    kind: Deployment
+    name: acp-workforce-portal
+
+replacements:
+- source:
+    fieldPath: data.OTEL_GRPC_ENDPOINT
+    kind: ConfigMap
+    name: otel-config
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.[name=acp-workforce-portal].env.[name=OTEL_EXPORTER_OTLP_ENDPOINT].value
+    select:
+      kind: Deployment
+      name: acp-workforce-portal
+

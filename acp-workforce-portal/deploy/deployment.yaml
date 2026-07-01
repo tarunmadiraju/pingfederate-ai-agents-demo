@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acp-workforce-portal
+  labels:
+    app: acp-workforce-portal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: acp-workforce-portal
+  template:
+    metadata:
+      labels:
+        app: acp-workforce-portal
+    spec:
+      nodeSelector:
+        acp/tier: applications
+      containers:
+      - name: acp-workforce-portal
+        image: acp-workforce-portal:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3000
+        env:
+        - name: NODE_EXTRA_CA_CERTS
+          value: /etc/ssl/platform-ca/ca.crt
+        - name: OTEL_SERVICE_NAME
+          value: "acp-workforce-portal"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: REPLACED_BY_KUSTOMIZE  # see otel component in acp-platform/deploy/otel
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        - name: NODE_OPTIONS
+          value: "--require ./tracing.cjs"
+        - name: JAEGER_QUERY_URL
+          value: "http://jaeger.observability.svc.cluster.local:16686"
+        volumeMounts:
+        - name: platform-ca
+          mountPath: /etc/ssl/platform-ca
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: platform-ca
+        configMap:
+          name: platform-ca

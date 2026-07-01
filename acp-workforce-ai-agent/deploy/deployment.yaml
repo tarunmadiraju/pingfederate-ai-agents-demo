@@ -1,0 +1,256 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acp-workforce-ai-agent
+  namespace: ai-agents
+  labels:
+    app: acp-workforce-ai-agent
+    workload-type: ai-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: acp-workforce-ai-agent
+  template:
+    metadata:
+      labels:
+        app: acp-workforce-ai-agent
+        workload-type: ai-agent
+        spiffe.io/spiffe-id: "true"
+      annotations:
+        acp.pingidentity.com/agent-description: "Workforce AI Agent - Handles expense queries via MCP tools with delegated user authorization"
+        acp.pingidentity.com/agent-owner: "platform-team@acme.com"
+        acp.pingidentity.com/agent-framework: "Express/Node.js"
+    spec:
+      serviceAccountName: workforce-ai-agent
+      nodeSelector:
+        acp/tier: applications
+      # ----------------------------------------------------------------
+      # Envoy + Authn Sidecar Architecture (replaces token-exchange-sidecar)
+      #
+      # INBOUND:
+      #   K8s Service (:10000) → Envoy (ext_proc filter)
+      #     → Authn Sidecar (:9010 gRPC): rewrite headers + inject actor SVID
+      #     → Envoy forwards to Agent (:3002)
+      #
+      # OUTBOUND:
+      #   Agent → iptables → Envoy (:15001)
+      #     → CIBA hosts: route to CIBA Proxy (:15002) for step-up auth
+      #     → Other hosts: passthrough to original destination
+      #     → TLS traffic: TCP passthrough (no inspection)
+      #
+      # Container UIDs:
+      #   Envoy: 1337 (Istio convention, excluded from iptables)
+      #   CIBA sidecar: 10002 (excluded from iptables)
+      # ----------------------------------------------------------------
+      initContainers:
+        # iptables init — redirects outbound TCP to Envoy
+        - name: iptables-init
+          image: acp-iptables-init:latest
+          imagePullPolicy: Always
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+            runAsUser: 0
+            runAsNonRoot: false
+          command:
+            - sh
+            - -c
+            - |
+              set -ex
+
+              # EXCEPT: Envoy (UID 1337) — prevents redirect loop
+              iptables -t nat -I OUTPUT -m owner --uid-owner 1337 -j RETURN
+
+              # EXCEPT: CIBA sidecar (UID 10002) — needs direct upstream access
+              iptables -t nat -I OUTPUT -m owner --uid-owner 10002 -j RETURN
+
+              # EXCEPT: OTLP telemetry exports (port 4317) — agent's OTel gRPC to Jaeger.
+              # Without this, Envoy's ORIGINAL_DST cluster drops the exports (UH flag)
+              # because ClusterIPs don't work with SO_ORIGINAL_DST in k3d.
+              iptables -t nat -I OUTPUT -p tcp --dport 4317 -j RETURN
+
+              # EXCEPT: Localhost (intra-pod: Envoy → agent, Envoy → sidecar)
+              iptables -t nat -I OUTPUT -d 127.0.0.1/8 -j RETURN
+
+              # OUTBOUND: Redirect private/internal TCP to Envoy outbound listener (:15001).
+              # Public internet IPs and the Docker host gateway bypass Envoy:
+              #   - Public IPs: ORIGINAL_DST fails in k3d (Docker NAT conntrack asymmetry)
+              #   - Docker host (Ollama): ORIGINAL_DST fails through HCM (SO_ORIGINAL_DST lost)
+              # nf_tables does not allow multiple -d flags per rule, so use a dedicated
+              # IS_PRIVATE chain:
+              #   - RFC1918 / loopback destinations → REDIRECT to Envoy
+              #   - All other destinations (public internet) → fall off chain end → ACCEPT
+              # EXCEPT: Docker host gateway (host.k3d.internal) — Ollama LLM.
+              # Resolve at init time so we don't hardcode the gateway IP.
+              # ORIGINAL_DST fails for this IP through Envoy's HTTP connection
+              # manager, and Ollama needs no auth/policy — bypass Envoy entirely.
+              HOST_GW=$(getent hosts host.k3d.internal | awk '{print $1}')
+              if [ -n "$HOST_GW" ]; then
+                echo "Docker host gateway: $HOST_GW"
+                iptables -t nat -I OUTPUT -p tcp -d "$HOST_GW" -j RETURN
+              else
+                echo "WARNING: could not resolve host.k3d.internal — Ollama may be unreachable"
+              fi
+
+              iptables -t nat -N IS_PRIVATE 2>/dev/null || iptables -t nat -F IS_PRIVATE
+              iptables -t nat -A IS_PRIVATE -p tcp -d 10.0.0.0/8     -j REDIRECT --to-port 15001
+              iptables -t nat -A IS_PRIVATE -p tcp -d 172.16.0.0/12  -j REDIRECT --to-port 15001
+              iptables -t nat -A IS_PRIVATE -p tcp -d 192.168.0.0/16 -j REDIRECT --to-port 15001
+              iptables -t nat -A IS_PRIVATE -p tcp -d 127.0.0.0/8    -j REDIRECT --to-port 15001
+              iptables -t nat -A OUTPUT -p tcp -j IS_PRIVATE
+
+              echo "=== iptables NAT OUTPUT chain ==="
+              iptables -t nat -L OUTPUT -n -v
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "64Mi"
+              cpu: "50m"
+
+        # Authn sidecar — ext_proc gRPC (:9010) + CIBA HTTP proxy (:15002)
+        # Starts before Envoy so ext_proc is available when Envoy begins serving.
+        - name: authn-sidecar
+          image: acp-identity-sidecar:latest
+          imagePullPolicy: Always
+          restartPolicy: Always
+          securityContext:
+            runAsUser: 10002
+            runAsNonRoot: true
+          args:
+            - --config-path
+            - /etc/sidecar/sidecar-svid-mint.yaml
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "acp-wf-ai-agent-identity-sidecar"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: REPLACED_BY_KUSTOMIZE  # see otel component in acp-platform/deploy/otel
+            - name: OTEL_TRACES_SAMPLER
+              value: "always_on"
+          ports:
+            - containerPort: 9010
+              name: grpc-sidecar
+            - containerPort: 15002
+              name: http-proxy
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 15002
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 15002
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 15002
+            periodSeconds: 10
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+            - name: sidecar-svid-mint-config
+              mountPath: /etc/sidecar
+              readOnly: true
+
+        # Envoy — inbound ext_proc + outbound routing (CIBA hosts / passthrough)
+        - name: envoy
+          image: envoyproxy/envoy:v1.32-latest
+          restartPolicy: Always
+          securityContext:
+            runAsUser: 1337
+            runAsNonRoot: true
+          ports:
+            - containerPort: 10000
+              name: http-pa-inbound
+            - containerPort: 15001
+              name: tcp-outbound
+          command:
+            - envoy
+            - --config-path
+            - /etc/envoy/envoy.yaml
+            - --log-level
+            - info
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 15
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 10
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+
+      containers:
+        - name: acp-workforce-ai-agent
+          image: acp-workforce-ai-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3002
+              name: http-internal
+          envFrom:
+            - configMapRef:
+                name: acp-workforce-ai-agent-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: "csi.spiffe.io"
+            readOnly: true
+        - name: envoy-config
+          configMap:
+            name: acp-workforce-ai-agent-envoy-config
+        - name: sidecar-svid-mint-config
+          configMap:
+            name: acp-workforce-ai-agent-sidecar-svid-mint-config

@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acp-workforce-ai-agent-config
+  namespace: ai-agents
+data:
+  # MCP Servers — JSON object keyed by server name.
+  # Each entry defines a server with attributes that control transport,
+  # authentication, and session behavior. The agent iterates all enabled
+  # servers at startup and discovers their tools dynamically.
+  #
+  # Attributes:
+  #   type          "local" | "remote"  — local = K8s-internal, remote = public internet
+  #   enabled       boolean             — toggle without removing from config
+  #   url           string              — MCP server endpoint URL
+  #   auth          boolean             — send Authorization + X-Subject-Token headers
+  #   stateless     boolean             — skip MCP session initialization
+  #   skipTlsVerify boolean             — disable TLS certificate verification
+  #   timeoutMs     number              — per-request timeout in milliseconds
+  #   headers       object              — static headers to send with every request
+  MCP_SERVERS: |
+    {
+      "expense-mcp": {
+        "type": "local",
+        "enabled": true,
+        "url": "http://pinggateway.localhost/expense/mcp",
+        "auth": true,
+        "stateless": false,
+        "skipTlsVerify": true,
+        "timeoutMs": 45000
+      },
+      "travel-mcp": {
+        "type": "local",
+        "enabled": true,
+        "url": "http://pinggateway.localhost/travel/mcp",
+        "auth": true,
+        "stateless": false,
+        "skipTlsVerify": true,
+        "timeoutMs": 45000
+      },
+      "data-gouv": {
+        "type": "remote",
+        "enabled": false,
+        "url": "https://mcp.data.gouv.fr/mcp",
+        "auth": false,
+        "stateless": true,
+        "timeoutMs": 30000
+      }
+    }
+
+  # LLM routing via Ollama — runs natively on the Mac host (GPU-accelerated).
+  # Activated at runtime via the /mode chat command (/mode llm).
+  # host.k3d.internal resolves to the Mac host IP from inside k3d pods.
+  # OLLAMA_MODEL=auto resolves to the first model returned by GET /api/tags
+  # at startup so no model name needs to be hardcoded.
+  OLLAMA_URL: "http://host.k3d.internal:11434"
+  OLLAMA_MODEL: "auto"
+  LLM_TIMEOUT_MS: "15000"
+
+  # OpenTelemetry
+  OTEL_SERVICE_NAME: "acp-workforce-ai-agent"
+  OTEL_EXPORTER_OTLP_ENDPOINT: REPLACED_BY_KUSTOMIZE  # see otel component in acp-platform/deploy/otel
+  OTEL_TRACES_SAMPLER: "always_on"
+  NODE_OPTIONS: "--require ./src/tracing.cjs"

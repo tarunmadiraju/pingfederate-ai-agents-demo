@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acp-workforce-portal
+  labels:
+    platform.acp/trust-ca: "true"

@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trace Graph · ACP</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Cpath d='M16 48V20l16-8 16 8v28H36V36h-8v12H16z' fill='white'/%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #0f172a; color: #f1f5f9; }
+        #graph-canvas { display: block; cursor: grab; }
+        #graph-canvas:active { cursor: grabbing; }
+        .node-rect { transition: stroke 0.15s, stroke-width 0.15s; }
+        .edge-path { transition: stroke 0.15s; }
+        .edge-label-bg { fill: #0f172a; }
+        .node-icon-wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        .node-icon-wrap i { color: #cbd5e1; font-size: 14px; line-height: 1; }
+        .node-group.is-ping .node-rect { filter: drop-shadow(0 0 6px rgba(59,130,246,0.55)); }
+        .node-group.is-agent-runtime .node-rect { filter: drop-shadow(0 0 6px rgba(168,85,247,0.55)); }
+        .node-group.is-spire .node-rect { filter: drop-shadow(0 0 6px rgba(20,184,166,0.55)); }
+        .node-group.is-backend .node-rect { filter: drop-shadow(0 0 6px rgba(16,185,129,0.35)); }
+        .dimmed { opacity: 0.22; transition: opacity 0.18s; }
+        .undimmed { opacity: 1; transition: opacity 0.18s; }
+        #tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 13px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #e2e8f0;
+            max-width: 280px;
+            z-index: 100;
+            white-space: pre-wrap;
+            /* Long, unbroken operation names (e.g. a2a.server.events.…enqueue_event)
+               must wrap inside the box rather than overflow the right edge. */
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+        }
+        #tooltip.hidden { display: none; }
+        .tooltip-hr { border: none; border-top: 1px solid #334155; margin: 6px 0; }
+        .tooltip-muted { color: #94a3b8; }
+        .span-row { background: #1e293b; border: 1px solid #334155; border-radius: 6px; }
+        .span-row-header { cursor: pointer; }
+        .span-row-header:hover { background: #243044; }
+        .span-tags { font-family: ui-monospace, monospace; font-size: 11px; color: #cbd5e1; }
+        /* Long, unbroken attribute values (e.g. url.full with query string) must
+           wrap inside the detail panel rather than overflow its right edge. */
+        .span-tags > div { overflow-wrap: anywhere; word-break: break-word; }
+        .span-tag-key { color: #94a3b8; }
+        .legend-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <!-- Header bar -->
+    <header class="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-700 flex-shrink-0" style="height:60px">
+        <div class="flex items-center gap-4">
+            <button onclick="window.close()"
+                class="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm transition-colors" title="Close tab">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <span class="text-slate-600">|</span>
+            <span class="text-slate-300 font-semibold text-sm" id="header-title">Trace Graph</span>
+            <a id="jaeger-link" href="#" target="_blank" rel="noopener noreferrer"
+               class="hidden text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 transition-colors">
+                Open in Jaeger
+                <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i>
+            </a>
+            <span class="text-slate-600">|</span>
+            <div class="hidden flex items-center gap-2" id="header-controls">
+                <button id="collapse-toggle"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors">
+                    <i id="collapse-icon" class="fa-solid fa-compress"></i>
+                    <span id="collapse-label">Expand</span>
+                </button>
+                <button id="spire-toggle" title="Reveal the SPIFFE/SPIRE identity fabric"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors">
+                    <i id="spire-icon" class="fa-solid fa-fingerprint"></i>
+                    <span id="spire-label">Show SPIFFE / SPIRE</span>
+                </button>
+                <button id="legend-header-btn"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>Legend</span>
+                </button>
+            </div>
+        </div>
+        <div id="header-stats" class="text-slate-500 text-xs tabular-nums hidden"></div>
+    </header>
+
+    <!-- Graph canvas -->
+    <div class="flex-1 relative overflow-hidden">
+        <svg id="graph-canvas" width="100%" height="100%">
+            <defs>
+                <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#475569"/>
+                </marker>
+                <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#3b82f6"/>
+                </marker>
+                <marker id="arrow-hover" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/>
+                </marker>
+                <marker id="arrow-purple" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#a855f7"/>
+                </marker>
+                <marker id="arrow-teal" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#14b8a6"/>
+                </marker>
+                <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#10b981"/>
+                </marker>
+            </defs>
+            <rect id="bg-rect" width="100%" height="100%" fill="#0f172a"/>
+            <g id="zoom-group"></g>
+        </svg>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="hidden absolute inset-0 flex items-center justify-center">
+            <div class="text-center text-slate-500">
+                <i class="fa-solid fa-circle-nodes text-4xl mb-4 block"></i>
+                <p class="text-sm">No trace loaded yet — send a message in the portal first.</p>
+                <button onclick="window.close()" class="mt-4 text-xs text-blue-400 hover:text-blue-300">
+                    Close tab
+                </button>
+            </div>
+        </div>
+
+        <!-- Zoom controls -->
+        <div id="zoom-controls" class="hidden absolute bottom-4 right-4 flex flex-col bg-slate-800 border border-slate-700 rounded-lg overflow-hidden shadow-lg">
+            <button onclick="zoomBy(1.25)" title="Zoom in"
+                class="px-3 py-2 hover:bg-slate-700 text-slate-300 text-sm">+</button>
+            <button onclick="zoomReset()" title="Reset view"
+                class="px-3 py-2 hover:bg-slate-700 text-slate-400 text-xs border-y border-slate-700">⊙</button>
+            <button onclick="zoomBy(0.8)" title="Zoom out"
+                class="px-3 py-2 hover:bg-slate-700 text-slate-300 text-sm">−</button>
+        </div>
+
+        <!-- Legend dropdown (anchored top-left, shown via JS) -->
+        <div id="legend" class="hidden absolute top-2 left-4 bg-slate-800 border border-slate-700 rounded-lg shadow-lg overflow-hidden text-slate-300 z-20">
+            <div id="legend-body" class="px-3 pb-3 pt-3 space-y-1.5">
+                <div class="legend-row"><i class="fa-solid fa-window-restore w-4 text-slate-400"></i> Portal / UI</div>
+                <div class="legend-row"><i class="fa-solid fa-arrow-right-to-bracket w-4" style="color:#38bdf8"></i> Envoy Inbound</div>
+                <div class="legend-row"><i class="fa-solid fa-id-badge w-4" style="color:#a78bfa"></i> Identity Sidecar</div>
+                <div class="legend-row"><i class="fa-solid fa-gears w-4" style="color:#a78bfa"></i> Sidecar ext_proc :9010 (gRPC)</div>
+                <div class="legend-row"><i class="fa-solid fa-arrow-right-arrow-left w-4" style="color:#a78bfa"></i> Sidecar authz_proxy :15002 (HTTP)</div>
+                <div class="legend-row"><i class="fa-solid fa-arrow-right-from-bracket w-4" style="color:#818cf8"></i> Envoy Outbound</div>
+                <div class="legend-row"><i class="fa-solid fa-robot w-4 text-slate-400"></i> AI Agent</div>
+                <div class="legend-row"><i class="fa-solid fa-cloud-sun w-4 text-slate-400"></i> Weather Agent</div>
+                <div class="legend-row"><i class="fa-solid fa-server w-4 text-slate-400"></i> SPIRE Server (synthetic)</div>
+                <div class="legend-row"><i class="fa-solid fa-fingerprint w-4 text-slate-400"></i> SPIRE Workload Agent (synthetic)</div>
+                <div class="legend-row"><i class="fa-solid fa-id-card w-4 text-slate-400"></i> SPIRE OIDC Bridge (synthetic)</div>
+                <div class="legend-row"><i class="fa-solid fa-route w-4 text-slate-400"></i> Gateway / Proxy</div>
+                <div class="legend-row"><i class="fa-solid fa-key w-4 text-slate-400"></i> Auth (PingFederate)</div>
+                <div class="legend-row"><i class="fa-solid fa-shield-halved w-4 text-slate-400"></i> Authz (PingAuthorize)</div>
+                <div class="legend-row"><i class="fa-solid fa-cube w-4 text-slate-400"></i> MCP Server</div>
+                <div class="legend-row"><i class="fa-solid fa-database w-4 text-slate-400"></i> Backend API</div>
+                <div class="legend-row"><i class="fa-solid fa-cloud w-4 text-slate-400"></i> Open-Meteo API (synthetic)</div>
+                <div class="legend-row"><i class="fa-solid fa-address-book w-4 text-slate-400"></i> A2A Registry (synthetic, expanded)</div>
+                <div class="legend-row"><i class="fa-solid fa-users-gear w-4 text-slate-400"></i> PingIDM — agent source of truth (synthetic, expanded)</div>
+                <div class="border-t border-slate-700 my-1"></div>
+                <div class="legend-row"><span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span> ok</div>
+                <div class="legend-row"><span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span> error</div>
+                <div class="legend-row"><span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500"></span> mixed</div>
+                <div class="border-t border-slate-700 my-1"></div>
+                <div class="legend-row"><span class="inline-block w-3 h-3 rounded-sm border border-purple-400/70" style="box-shadow: 0 0 6px rgba(168,85,247,0.6)"></span> Agent Runtime</div>
+                <div class="legend-row"><span class="inline-block w-3 h-3 rounded-sm border border-purple-300/60" style="box-shadow: 0 0 4px rgba(192,132,252,0.5)"></span> Agent cluster</div>
+                <div class="legend-row"><span class="inline-block w-3 h-3 rounded-sm border border-teal-400/70" style="box-shadow: 0 0 6px rgba(20,184,166,0.6)"></span> SPIFFE / SPIRE</div>
+                <div class="legend-row"><span class="inline-block w-3 h-3 rounded-sm border border-blue-400/70" style="box-shadow: 0 0 6px rgba(59,130,246,0.6)"></span> Ping Agentic Platform</div>
+                <div class="legend-row"><span class="inline-block w-3 h-3 rounded-sm border border-emerald-400/70" style="box-shadow: 0 0 6px rgba(16,185,129,0.6)"></span> Backends</div>
+                <div class="border-t border-slate-700 my-1"></div>
+                <div class="text-[10px] font-semibold tracking-widest text-slate-500 uppercase pb-0.5">Exchange (expanded)</div>
+                <div class="legend-row"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#cbd5e1" stroke-width="2"/></svg> HTTP forward</div>
+                <div class="legend-row"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="2 4"/></svg> gRPC / JWKS (control)</div>
+                <div class="legend-row"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/></svg> Token exchange (RFC 8693)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="hidden"></div>
+
+    <!-- Side panel (slide-in from right) -->
+    <aside id="detail-panel"
+           class="fixed top-[60px] right-0 bottom-0 w-[380px] bg-slate-900 border-l border-slate-700 transform translate-x-full transition-transform duration-200 ease-out overflow-y-auto z-50">
+        <div class="flex items-center justify-between p-4 border-b border-slate-700">
+            <h2 id="panel-title" class="text-slate-200 font-semibold text-sm pr-4 truncate"></h2>
+            <button onclick="closeDetailPanel()"
+                class="text-slate-500 hover:text-slate-300 text-xl leading-none flex-shrink-0"
+                title="Close">×</button>
+        </div>
+        <div id="panel-meta" class="px-4 py-3 border-b border-slate-700 text-xs text-slate-400 space-y-1"></div>
+        <div id="panel-spans" class="p-3 space-y-2"></div>
+        <div id="panel-footer" class="p-4 border-t border-slate-700"></div>
+    </aside>
+
+    <script src="/js/d3-bundle.js"></script>
+    <script src="/js/traceGraph.js"></script>
+    <script>
+    (function () {
+        const NODE_H = 56;
+        const NODE_MIN_W = 120;
+        const NODE_PAD_X = 32;
+
+        // Compound graph layout:
+        //   AGENT RUNTIME (outer cluster, purple)
+        //     ├── [Agent Cluster per agent] (inner cluster, lighter purple)
+        //     │     ├── Envoy Inbound
+        //     │     ├── Authn Sidecar
+        //     │     ├── Envoy Outbound  (Workforce AI Agent only)
+        //     │     └── AI Agent / Weather Agent
+        //     └── SPIRE Infra (teal cluster)
+        //           ├── SPIRE Server
+        //           ├── SPIRE Workload Agent
+        //           └── SPIRE OIDC Bridge
+        const CLUSTER_AGENT_RUNTIME = '__cluster_agent_runtime__';
+        const CLUSTER_SPIRE         = '__cluster_spire__';
+        const CLUSTER_PING          = '__cluster_ping__';
+        const CLUSTER_BACKENDS      = '__cluster_backends__';
+        const SPIRE_NODE_IDS        = ['SPIRE Server', 'SPIRE Workload Agent', 'SPIRE OIDC Bridge'];
+        const BACKEND_IDS           = new Set(['Expense MCP Server', 'Travel MCP Server', 'Expense API', 'Open-Meteo API']);
+
+        const NODE_SUBLABELS = {};
+
+        // Caption shown under a node's label in the expanded intra-pod view:
+        //   • split sidecar ports → their port string (set by traceGraph as node.sublabel)
+        //   • Envoy listeners      → their ordered filter chain (node.filterChain)
+        // Mutates node._twoLine so width/height measurement reserves the row.
+        function resolveSubLabel(node) {
+            let sub = null;
+            if (node.sublabel) {
+                sub = node.sublabel;
+            } else if (node.filterChain && node.filterChain.length) {
+                sub = node.filterChain.join(' › ');
+            } else if (NODE_SUBLABELS[node.label]) {
+                sub = NODE_SUBLABELS[node.label];
+            }
+            node._twoLine = !!sub;
+            return sub;
+        }
+
+        const STATUS_COLORS = {
+            ok:    '#10b981',
+            error: '#ef4444',
+            mixed: '#f59e0b',
+        };
+
+        const tooltip = document.getElementById('tooltip');
+
+        function showTooltip(html, event) {
+            tooltip.innerHTML = html;
+            tooltip.classList.remove('hidden');
+            positionTooltip(event);
+        }
+
+        function positionTooltip(event) {
+            const pad = 14;
+            let x = event.clientX + pad;
+            let y = event.clientY + pad;
+            const w = tooltip.offsetWidth || 240;
+            const h = tooltip.offsetHeight || 80;
+            if (x + w > window.innerWidth - 8) x = event.clientX - w - pad;
+            if (y + h > window.innerHeight - 8) y = event.clientY - h - pad;
+            tooltip.style.left = x + 'px';
+            tooltip.style.top = y + 'px';
+        }
+
+        function hideTooltip() {
+            tooltip.classList.add('hidden');
+        }
+
+        function escHtml(s) {
+            return String(s ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function outcomeBreakdownHtml(spans) {
+            let okN = 0, errN = 0;
+            const okCodes = {};
+            for (const s of spans || []) {
+                if (s.status === 'error') errN++;
+                else okN++;
+                if (s.statusCode) okCodes[s.statusCode] = (okCodes[s.statusCode] || 0) + 1;
+            }
+            const parts = [];
+            if (okN > 0) {
+                const codeStr = Object.keys(okCodes).filter(c => /^[12]/.test(c)).sort().join(', ') || 'ok';
+                parts.push(`<span style="color:#10b981">✓ ${escHtml(codeStr)} ×${okN}</span>`);
+            }
+            if (errN > 0) {
+                parts.push(`<span style="color:#ef4444">✗ errors ×${errN}</span>`);
+            }
+            return parts.join('  ');
+        }
+
+        function nodeTooltipHtml(node) {
+            const ops = Object.entries(node.operationCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([op, n]) => `  ${escHtml(op)}  ×${n}`)
+                .join('\n');
+            const breakdown = outcomeBreakdownHtml(node.spans);
+            return `<strong>${escHtml(node.label)}</strong>
+<span class="tooltip-muted">${escHtml(node.rawServices.join(', '))}</span>
+<hr class="tooltip-hr">Spans: ${node.totalSpans}  ·  Total: ${node.totalDurationMs}ms${ops ? '\n' + ops : ''}${breakdown ? '\n' + breakdown : ''}
+<hr class="tooltip-hr"><span class="tooltip-muted" style="font-size:10px">Click for span detail →</span>`;
+        }
+
+        function edgeTooltipHtml(edge) {
+            const breakdown = outcomeBreakdownHtml(edge.spans);
+            const srcLabel = edge.sourceLabel || edge.source;
+            const tgtLabel = edge.targetLabel || edge.target;
+            return `<strong>${escHtml(srcLabel)} → ${escHtml(tgtLabel)}</strong>
+<hr class="tooltip-hr">${escHtml(edge.role)}  ·  <span class="tooltip-muted">${escHtml(edge.protocol)}</span>
+Calls: ${edge.callCount}  ·  Avg: ${edge.avgDurationMs}ms${breakdown ? '\n' + breakdown : ''}
+<hr class="tooltip-hr"><span class="tooltip-muted" style="font-size:10px">Click for span detail →</span>`;
+        }
+
+        // ── Side panel state ───────────────────────────────────────────────────
+        let _activeTraceId = '';
+        let _allNodeGroups = null;
+        let _allEdgeGroups = null;
+        let _zoomBehavior = null;
+        let _initialTransform = null;
+        let _svgEl = null;
+
+        function setDimmed(keepNodeIds, keepEdgeKeys) {
+            if (!_allNodeGroups || !_allEdgeGroups) return;
+            _allNodeGroups.each(function (d, i) {
+                const sel = D3Graph.select(this);
+                const id = sel.attr('data-node-id');
+                if (keepNodeIds.has(id)) {
+                    sel.attr('class', sel.attr('data-base-class') + ' undimmed');
+                } else {
+                    sel.attr('class', sel.attr('data-base-class') + ' dimmed');
+                }
+            });
+            _allEdgeGroups.each(function () {
+                const sel = D3Graph.select(this);
+                const k = sel.attr('data-edge-key');
+                if (keepEdgeKeys.has(k)) {
+                    sel.attr('class', sel.attr('data-base-class') + ' undimmed');
+                } else {
+                    sel.attr('class', sel.attr('data-base-class') + ' dimmed');
+                }
+            });
+        }
+
+        function clearDimmed() {
+            if (!_allNodeGroups || !_allEdgeGroups) return;
+            _allNodeGroups.each(function () {
+                const sel = D3Graph.select(this);
+                sel.attr('class', sel.attr('data-base-class'));
+            });
+            _allEdgeGroups.each(function () {
+                const sel = D3Graph.select(this);
+                sel.attr('class', sel.attr('data-base-class'));
+            });
+        }
+
+        function spanRowHtml(span, traceId) {
+            const statusColor = STATUS_COLORS[span.status] || STATUS_COLORS.ok;
+            const codeBadge = span.statusCode
+                ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                          style="background:${span.status === 'error' ? '#7f1d1d' : '#1e3a5f'};color:${span.status === 'error' ? '#fca5a5' : '#93c5fd'}">${escHtml(span.statusCode)}</span>`
+                : '';
+            const tagEntries = Object.entries(span.tags || {})
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => `<div><span class="span-tag-key">${escHtml(k)}</span>: ${escHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</div>`)
+                .join('');
+            const jaegerHref = `https://jaeger.localhost/trace/${escHtml(traceId)}?uiFind=${escHtml(span.spanID)}`;
+            return `
+<div class="span-row">
+    <div class="span-row-header flex items-center gap-2 px-3 py-2 text-xs">
+        <i class="fa-solid fa-chevron-right text-[9px] text-slate-500 chevron"></i>
+        <span class="text-slate-200 font-medium truncate flex-1" title="${escHtml(span.operationName)}">${escHtml(span.operationName)}</span>
+        <span class="text-slate-400 tabular-nums">${span.durationMs}ms</span>
+        <span class="inline-block w-2 h-2 rounded-full" style="background:${statusColor}"></span>
+        ${codeBadge}
+    </div>
+    <div class="span-row-body hidden border-t border-slate-700 px-3 py-2 space-y-0.5 span-tags">
+        <div><span class="span-tag-key">service</span>: ${escHtml(span.processName)}</div>
+        <div><span class="span-tag-key">spanID</span>: ${escHtml(span.spanID)}</div>
+        <div><span class="span-tag-key">offset</span>: ${span.startTimeOffsetMs}ms</div>
+        ${tagEntries}
+        <div class="pt-1.5">
+            <a href="${jaegerHref}" target="_blank" rel="noopener noreferrer"
+               class="text-blue-400 hover:text-blue-300 text-[11px]">Open in Jaeger ↗</a>
+        </div>
+    </div>
+</div>`;
+        }
+
+        function wireSpanRows(container) {
+            container.querySelectorAll('.span-row').forEach(row => {
+                const header = row.querySelector('.span-row-header');
+                const body = row.querySelector('.span-row-body');
+                const chev = row.querySelector('.chevron');
+                header.addEventListener('click', () => {
+                    const open = !body.classList.contains('hidden');
+                    if (open) {
+                        body.classList.add('hidden');
+                        chev.classList.remove('fa-chevron-down');
+                        chev.classList.add('fa-chevron-right');
+                    } else {
+                        body.classList.remove('hidden');
+                        chev.classList.remove('fa-chevron-right');
+                        chev.classList.add('fa-chevron-down');
+                    }
+                });
+            });
+            container.querySelectorAll('.span-group-header').forEach(header => {
+                const group = header.closest('.span-group');
+                const body = group.querySelector('.span-group-body');
+                const chev = header.querySelector('.group-chevron');
+                header.addEventListener('click', () => {
+                    const open = !body.classList.contains('hidden');
+                    if (open) {
+                        body.classList.add('hidden');
+                        chev.classList.remove('fa-chevron-down');
+                        chev.classList.add('fa-chevron-right');
+                    } else {
+                        body.classList.remove('hidden');
+                        chev.classList.remove('fa-chevron-right');
+                        chev.classList.add('fa-chevron-down');
+                    }
+                });
+            });
+        }
+
+        const KIND_ORDER = ['server', 'client', 'internal', 'producer', 'consumer'];
+
+        function groupSpansByKind(spans) {
+            const groups = {};
+            for (const span of spans) {
+                const kind = (span.tags['span.kind'] || 'internal').toLowerCase();
+                if (!groups[kind]) groups[kind] = [];
+                groups[kind].push(span);
+            }
+            const ordered = [];
+            for (const k of KIND_ORDER) {
+                if (groups[k]) { ordered.push([k, groups[k]]); delete groups[k]; }
+            }
+            for (const [k, v] of Object.entries(groups)) ordered.push([k, v]);
+            return ordered;
+        }
+
+        function spansGroupedHtml(spans, traceId) {
+            const groups = groupSpansByKind(spans);
+            if (groups.length <= 1) {
+                return (spans || []).map(s => spanRowHtml(s, traceId)).join('');
+            }
+            return groups.map(([kind, groupSpans]) => `
+<div class="span-group">
+    <div class="span-group-header flex items-center gap-2 px-1 py-1.5 cursor-pointer select-none">
+        <i class="fa-solid fa-chevron-down group-chevron text-[9px] text-slate-500"></i>
+        <span class="text-[10px] font-semibold tracking-widest text-slate-400 uppercase">${escHtml(kind)}</span>
+        <span class="ml-auto text-[10px] text-slate-600">(${groupSpans.length})</span>
+    </div>
+    <div class="span-group-body space-y-2">
+        ${groupSpans.map(s => spanRowHtml(s, traceId)).join('')}
+    </div>
+</div>`).join('');
+        }
+
+        function openEdgePanel(edge) {
+            const panel = document.getElementById('detail-panel');
+            const srcLabel = edge.sourceLabel || edge.source;
+            const tgtLabel = edge.targetLabel || edge.target;
+            document.getElementById('panel-title').textContent = `${srcLabel} → ${tgtLabel}`;
+
+            const breakdown = outcomeBreakdownHtml(edge.spans);
+            document.getElementById('panel-meta').innerHTML = `
+                <div><span class="text-slate-500">Role:</span> ${escHtml(edge.role)} <span class="text-slate-600">·</span> ${escHtml(edge.protocol)}</div>
+                <div><span class="text-slate-500">Calls:</span> ${edge.callCount}
+                     <span class="text-slate-600">·</span> avg ${edge.avgDurationMs}ms
+                     <span class="text-slate-600">·</span> ${edge.totalDurationMs}ms total</div>
+                ${breakdown ? `<div>${breakdown}</div>` : ''}
+            `;
+
+            const spansContainer = document.getElementById('panel-spans');
+            spansContainer.innerHTML = (edge.spans || [])
+                .map(s => spanRowHtml(s, _activeTraceId)).join('');
+            wireSpanRows(spansContainer);
+
+            const deepLink = `https://jaeger.localhost/trace/${_activeTraceId}`;
+            document.getElementById('panel-footer').innerHTML = `
+                <a href="${deepLink}" target="_blank" rel="noopener noreferrer"
+                   class="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2 rounded transition-colors">
+                    Open trace in Jaeger ↗
+                </a>
+            `;
+
+            panel.classList.remove('translate-x-full');
+            setDimmed(new Set([edge.source, edge.target]), new Set([edge._key]));
+        }
+
+        function openNodePanel(node) {
+            const panel = document.getElementById('detail-panel');
+            document.getElementById('panel-title').textContent = node.label;
+
+            const breakdown = outcomeBreakdownHtml(node.spans);
+            // A2A Registry surfaces the discovery result pulled from the
+            // a2a.discovery.sidecar span (agent count + routable domain tokens).
+            const discoveryHtml = (node.discoveryAgentCount != null || node.discoveryAgents)
+                ? `<div><span class="text-slate-500">Discovered:</span> ${
+                       node.discoveryAgentCount != null ? `${node.discoveryAgentCount} agent${node.discoveryAgentCount === 1 ? '' : 's'}` : '—'
+                   }${node.discoveryAgents ? ` <span class="text-slate-600">·</span> ${escHtml(node.discoveryAgents)}` : ''}</div>`
+                : '';
+            document.getElementById('panel-meta').innerHTML = `
+                <div><span class="text-slate-500">Service:</span> ${escHtml(node.rawServices.join(', '))}</div>
+                <div><span class="text-slate-500">Spans:</span> ${node.totalSpans}
+                     <span class="text-slate-600">·</span> ${node.totalDurationMs}ms</div>
+                ${discoveryHtml}
+                ${breakdown ? `<div>${breakdown}</div>` : ''}
+            `;
+
+            const spansContainer = document.getElementById('panel-spans');
+            spansContainer.innerHTML = spansGroupedHtml(node.spans || [], _activeTraceId);
+            wireSpanRows(spansContainer);
+
+            const deepLink = `https://jaeger.localhost/trace/${_activeTraceId}`;
+            document.getElementById('panel-footer').innerHTML = `
+                <a href="${deepLink}" target="_blank" rel="noopener noreferrer"
+                   class="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2 rounded transition-colors">
+                    Open trace in Jaeger ↗
+                </a>
+            `;
+
+            panel.classList.remove('translate-x-full');
+            setDimmed(new Set([node.id]), new Set());
+        }
+
+        window.closeDetailPanel = function () {
+            const panel = document.getElementById('detail-panel');
+            panel.classList.add('translate-x-full');
+            clearDimmed();
+        };
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const panel = document.getElementById('detail-panel');
+                if (!panel.classList.contains('translate-x-full')) {
+                    window.closeDetailPanel();
+                }
+            }
+        });
+
+        // Click-outside detection on the SVG canvas
+        document.getElementById('graph-canvas').addEventListener('click', (e) => {
+            if (e.target.id === 'graph-canvas' || e.target.id === 'bg-rect') {
+                const panel = document.getElementById('detail-panel');
+                if (!panel.classList.contains('translate-x-full')) {
+                    window.closeDetailPanel();
+                }
+            }
+        });
+
+        // ── Zoom controls (exposed for inline onclick) ─────────────────────────
+        window.zoomBy = function (k) {
+            if (!_zoomBehavior || !_svgEl) return;
+            D3Graph.select(_svgEl)
+                .transition().duration(150)
+                .call(_zoomBehavior.scaleBy, k);
+        };
+        window.zoomReset = function () {
+            if (!_zoomBehavior || !_svgEl || !_initialTransform) return;
+            D3Graph.select(_svgEl)
+                .transition().duration(200)
+                .call(_zoomBehavior.transform, _initialTransform);
+        };
+
+        // Legend toggle (header button)
+        document.getElementById('legend-header-btn').addEventListener('click', () => {
+            document.getElementById('legend').classList.toggle('hidden');
+        });
+
+        // Close legend when clicking outside
+        document.addEventListener('click', (e) => {
+            const legend = document.getElementById('legend');
+            const btn = document.getElementById('legend-header-btn');
+            if (!legend.classList.contains('hidden') && !legend.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+                legend.classList.add('hidden');
+            }
+        });
+
+        // ── Render ────────────────────────────────────────────────────────────
+        function render(graph) {
+            const { nodes, edges, totalDurationMs, traceId, deepLink } = graph;
+            _activeTraceId = traceId;
+
+            // Header
+            const shortId = traceId ? traceId.slice(0, 8) + '…' : '…';
+            document.getElementById('header-title').textContent = `Trace Graph · ${shortId}`;
+
+            const jaegerLink = document.getElementById('jaeger-link');
+            jaegerLink.href = deepLink;
+            jaegerLink.classList.remove('hidden');
+
+            const statsEl = document.getElementById('header-stats');
+            statsEl.textContent = `${totalDurationMs}ms · ${nodes.length} nodes · ${edges.length} edges`;
+            statsEl.classList.remove('hidden');
+
+            document.getElementById('zoom-controls').classList.remove('hidden');
+            document.getElementById('header-controls').classList.remove('hidden');
+
+            const svgEl = document.getElementById('graph-canvas');
+            _svgEl = svgEl;
+            const zoomGroup = D3Graph.select('#zoom-group');
+            zoomGroup.selectAll('*').remove();
+
+            // ── Pre-compute node widths via off-screen text measurement ────────
+            const measureSvg = D3Graph.select('body').append('svg')
+                .attr('width', 0).attr('height', 0)
+                .style('position', 'absolute').style('visibility', 'hidden');
+            for (const node of nodes) {
+                const t = measureSvg.append('text')
+                    .attr('font-size', '13px')
+                    .attr('font-weight', '500')
+                    .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                    .text(node.label);
+                const len = t.node().getComputedTextLength();
+                let w = Math.ceil(len) + NODE_PAD_X + 22; // +22 for icon
+                // Account for a sublabel / filter-chain caption so it doesn't overflow.
+                const subText = resolveSubLabel(node);
+                if (subText) {
+                    const st = measureSvg.append('text')
+                        .attr('font-size', '10px')
+                        .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                        .text(subText);
+                    w = Math.max(w, Math.ceil(st.node().getComputedTextLength()) + NODE_PAD_X + 22);
+                }
+                node._w = Math.max(NODE_MIN_W, w);
+                node._h = node._twoLine ? NODE_H + 4 : NODE_H;
+            }
+            measureSvg.remove();
+
+            // ── Layout via dagre with native compound graph support ───────────
+            // AGENT RUNTIME wraps per-agent clusters + the SPIRE cluster.
+            // Each agent gets its own inner cluster containing its components.
+            const { agentConfigs } = graph;
+            const nodeById2 = {};
+            for (const n of nodes) nodeById2[n.id] = n;
+
+            const agentRuntimeNodes = nodes.filter(n => n.isAgentRuntime);
+            const useCompound = agentRuntimeNodes.length > 0;
+
+            const dagreGraph = new D3Graph.dagre.graphlib.Graph({ compound: true, multigraph: true })
+                .setGraph({
+                    rankdir: 'LR',
+                    ranker: 'network-simplex',
+                    nodesep: 70,
+                    ranksep: 140,
+                    edgesep: 30,
+                    marginx: 40,
+                    marginy: 40,
+                })
+                .setDefaultEdgeLabel(() => ({}));
+
+            const RANK_HINTS = {
+                'Workforce Portal':   'source',
+                'Expense MCP Server': 'sink',
+                'Travel MCP Server':  'sink',
+                'Expense API':        'sink',
+                'Open-Meteo API':     'sink',
+            };
+
+            for (const node of nodes) {
+                // RANK_HINTS keyed by display label (node.label) since node.id is now
+                // the raw OTel service name for real nodes, label-as-id for synthetics.
+                const hint = RANK_HINTS[node.label];
+                dagreGraph.setNode(node.id, {
+                    label: node.label,
+                    width: node._w,
+                    height: node._h,
+                    ...(hint ? { rank: hint } : {}),
+                });
+            }
+
+            const isCollapsedMode = graph.isCollapsed || false;
+
+            if (useCompound) {
+                dagreGraph.setNode(CLUSTER_AGENT_RUNTIME, { label: 'AGENT RUNTIME', clusterLabelPos: 'top', paddingX: 36, paddingY: 52 });
+
+                if (isCollapsedMode) {
+                    // In collapsed mode, each agent is a single node — place directly in AGENT RUNTIME.
+                    const collapsedClusterNodes = nodes.filter(n => n.isCollapsedCluster);
+                    for (const n of collapsedClusterNodes) dagreGraph.setParent(n.id, CLUSTER_AGENT_RUNTIME);
+                } else {
+                    // One inner cluster per agent.
+                    // Nodes are now keyed by raw service name, so use cfg.nodes[*].raw as IDs.
+                    for (const cfg of (agentConfigs || [])) {
+                        const clusterId = `__cluster_agent_${cfg.clusterLabel}__`;
+                        const agentNodeRaws = Object.values(cfg.nodes).map(n => n.raw);
+                        const presentIds = agentNodeRaws.filter(raw => nodeById2[raw]);
+                        if (presentIds.length === 0) continue;
+                        dagreGraph.setNode(clusterId, { label: cfg.clusterLabel, clusterLabelPos: 'top', paddingX: 30, paddingY: 44 });
+                        dagreGraph.setParent(clusterId, CLUSTER_AGENT_RUNTIME);
+                        for (const id of presentIds) dagreGraph.setParent(id, clusterId);
+                    }
+                }
+
+                // SPIRE cluster (teal) — sibling of agent clusters inside AGENT RUNTIME.
+                // Expanded mode only: matches the three raw SPIRE node ids. In collapsed
+                // mode those fold into a single teal SPIRE node (isCollapsedCluster) that is
+                // placed directly in AGENT RUNTIME by the isCollapsedMode branch above — no
+                // teal sub-cluster, mirroring how collapsed agent nodes drop their inner box.
+                const spirePresent = SPIRE_NODE_IDS.filter(id => nodeById2[id]);
+                if (spirePresent.length > 0) {
+                    dagreGraph.setNode(CLUSTER_SPIRE, { label: 'SPIFFE / SPIRE', clusterLabelPos: 'top', paddingX: 30, paddingY: 44 });
+                    dagreGraph.setParent(CLUSTER_SPIRE, CLUSTER_AGENT_RUNTIME);
+                    for (const id of spirePresent) dagreGraph.setParent(id, CLUSTER_SPIRE);
+                }
+            }
+
+            const pingNodes = nodes.filter(n => n.isPing);
+            if (pingNodes.length > 0) {
+                dagreGraph.setNode(CLUSTER_PING, { label: 'PING AGENTIC PLATFORM', clusterLabelPos: 'top', paddingX: 28, paddingY: 36 });
+                for (const n of pingNodes) dagreGraph.setParent(n.id, CLUSTER_PING);
+            }
+
+            const backendNodes = nodes.filter(n => BACKEND_IDS.has(n.label));
+            if (backendNodes.length > 0) {
+                dagreGraph.setNode(CLUSTER_BACKENDS, { label: 'BACKENDS', clusterLabelPos: 'top', paddingX: 28, paddingY: 36 });
+                for (const n of backendNodes) dagreGraph.setParent(n.id, CLUSTER_BACKENDS);
+            }
+
+            // Edge name = source->target — multigraph allows parallel edges
+            // (e.g. PingGateway ↔ Expense MCP) to be laid out separately.
+            for (const edge of edges) {
+                edge._key = `${edge.source}->${edge.target}`;
+                dagreGraph.setEdge(edge.source, edge.target, {
+                    labelpos: 'c',
+                    labeloffset: 0,
+                    width: 90,
+                    height: 30,
+                }, edge._key);
+            }
+
+            D3Graph.dagre.layout(dagreGraph);
+
+            // Convert dagre's center coordinates → top-left for our SVG rendering.
+            for (const node of nodes) {
+                const dn = dagreGraph.node(node.id);
+                node.x = dn.x - node._w / 2;
+                node.y = dn.y - node._h / 2;
+                node._cx = dn.x;
+                node._cy = dn.y;
+            }
+
+            // Capture each edge's polyline + label position from dagre.
+            for (const edge of edges) {
+                const de = dagreGraph.edge(edge.source, edge.target, edge._key);
+                edge._points = (de && de.points) ? de.points : [];
+                edge._labelX = de ? de.x : 0;
+                edge._labelY = de ? de.y : 0;
+            }
+
+            // ── Cluster rects (drawn first, behind nodes & edges) ─────────────
+            // dagre populates each cluster meta-node with its own x/y/width/height.
+            function drawCluster(id, fillColor, strokeColor, label) {
+                if (!dagreGraph.hasNode(id)) return;
+                const c = dagreGraph.node(id);
+                if (!c || !c.width || !c.height) return;
+                const x = c.x - c.width / 2;
+                const y = c.y - c.height / 2;
+                const g = zoomGroup.append('g').attr('class', 'cluster');
+                g.append('rect')
+                    .attr('x', x).attr('y', y)
+                    .attr('width', c.width).attr('height', c.height)
+                    .attr('rx', 16)
+                    .attr('fill', fillColor)
+                    .attr('stroke', strokeColor)
+                    .attr('stroke-dasharray', '4 4')
+                    .attr('stroke-width', 1);
+                g.append('text')
+                    .attr('x', x + 14)
+                    .attr('y', y + 22)
+                    .attr('text-anchor', 'start')
+                    .attr('fill', strokeColor)
+                    .attr('font-size', '11px')
+                    .attr('font-weight', '600')
+                    .attr('letter-spacing', '0.15em')
+                    .text(label);
+            }
+
+            // Draw outermost clusters first so inner rects paint on top.
+            drawCluster(CLUSTER_PING,          '#1e3a5f22', '#3b82f6', 'PING AGENTIC PLATFORM');
+            drawCluster(CLUSTER_AGENT_RUNTIME, '#2e106533', '#a855f7', 'AGENT RUNTIME');
+            // Per-agent inner clusters — only in expanded mode.
+            if (!isCollapsedMode) {
+                for (const cfg of (agentConfigs || [])) {
+                    const clusterId = `__cluster_agent_${cfg.clusterLabel}__`;
+                    drawCluster(clusterId, '#3b0d6644', '#c084fc', cfg.clusterLabel);
+                }
+            }
+            // SPIRE cluster (teal).
+            drawCluster(CLUSTER_SPIRE,         '#04302e44', '#14b8a6', 'SPIFFE / SPIRE');
+            drawCluster(CLUSTER_BACKENDS,      '#0f2920aa', '#10b981', 'BACKENDS');
+
+            // ── Bounds for initial transform ───────────────────────────────────
+            const layoutDims = dagreGraph.graph();
+            const margin = 80;
+            const minX = -margin;
+            const minY = -margin;
+            const graphW = (layoutDims.width || 0) + margin * 2;
+            const graphH = (layoutDims.height || 0) + margin * 2;
+
+            // ── Edges (drawn before nodes so they sit underneath) ──────────────
+            const nodeById = nodeById2;
+
+            const edgeGroup = zoomGroup.append('g').attr('class', 'edges');
+            const edgeGroupSels = [];
+
+            // Smoothed line through dagre's polyline points.
+            const edgeLineGen = D3Graph.line()
+                .x(d => d.x)
+                .y(d => d.y)
+                .curve(D3Graph.curveBasis);
+
+            for (const edge of edges) {
+                const src = nodeById[edge.source];
+                const tgt = nodeById[edge.target];
+                if (!src || !tgt) continue;
+
+                const isTouchingPing    = src.isPing || tgt.isPing;
+                const isTouchingSpire   = src.isSpire || tgt.isSpire || SPIRE_NODE_IDS.includes(src.id) || SPIRE_NODE_IDS.includes(tgt.id);
+                const isTouchingAgent   = (src.isAgentRuntime || tgt.isAgentRuntime) && !isTouchingSpire;
+                const isTouchingBackend = (src.isBackend || tgt.isBackend) && !isTouchingPing;
+                const isSyntheticEdge   = edge.isSynthetic;
+                const strokeColor = isTouchingPing    ? '#3b82f6'
+                                  : isTouchingSpire   ? '#14b8a6'
+                                  : isTouchingAgent   ? '#a855f7'
+                                  : isTouchingBackend ? '#10b981'
+                                  : '#475569';
+                const markerId = isTouchingPing    ? 'arrow-blue'
+                               : isTouchingSpire   ? 'arrow-teal'
+                               : isTouchingAgent   ? 'arrow-purple'
+                               : isTouchingBackend ? 'arrow-green'
+                               : 'arrow';
+                const strokeW = isSyntheticEdge ? 1 : Math.min(5, 1.5 + Math.log2(edge.callCount + 1) * 0.6);
+
+                // Dash pattern encodes the *kind* of network exchange (expanded view):
+                //   grpc / jwks → dotted (control-plane side calls)
+                //   exchange    → medium dash (RFC 8693 token exchange)
+                //   synthetic   → existing short dash
+                //   http        → solid
+                const restDash = edge.exchangeKind === 'grpc'     ? '2 4'
+                               : edge.exchangeKind === 'jwks'     ? '2 4'
+                               : edge.exchangeKind === 'exchange' ? '6 4'
+                               : isSyntheticEdge                   ? '5 4'
+                               : null;
+
+                // Fall back to a straight centre-to-centre line if dagre returned no points
+                // (shouldn't happen for well-formed graphs, but guard anyway).
+                const points = (edge._points && edge._points.length > 0)
+                    ? edge._points
+                    : [
+                        { x: src.x + src._w / 2, y: src.y + src._h / 2 },
+                        { x: tgt.x + tgt._w / 2, y: tgt.y + tgt._h / 2 },
+                    ];
+                const pathD = edgeLineGen(points);
+                // Approximate endpoints for fallback positioning of labels/badges.
+                const s = points[0];
+                const t = points[points.length - 1];
+
+                const eg = edgeGroup.append('g')
+                    .attr('class', 'edge-group')
+                    .attr('data-base-class', 'edge-group')
+                    .attr('data-edge-key', edge._key)
+                    .style('cursor', 'pointer');
+                edgeGroupSels.push(eg.node());
+
+                const pathEl = eg.append('path')
+                    .attr('class', 'edge-path')
+                    .attr('d', pathD)
+                    .attr('fill', 'none')
+                    .attr('stroke', strokeColor)
+                    .attr('stroke-width', strokeW)
+                    .attr('stroke-dasharray', restDash)
+                    .attr('marker-end', `url(#${markerId})`);
+
+                // Animate stroke draw-in, then restore the exchange-kind dash pattern.
+                const node = pathEl.node();
+                let totalLen = 0;
+                try { totalLen = node.getTotalLength(); } catch (_) { totalLen = 0; }
+                if (totalLen > 0) {
+                    pathEl
+                        .attr('stroke-dasharray', totalLen)
+                        .attr('stroke-dashoffset', totalLen)
+                        .transition().duration(300).delay(150)
+                        .attr('stroke-dashoffset', 0)
+                        .on('end', () => pathEl.attr('stroke-dasharray', restDash));
+                }
+
+                // Animated traffic dot for edges with > 1 call
+                if (edge.callCount > 1 && totalLen > 0) {
+                    const dot = eg.append('circle')
+                        .attr('r', 3)
+                        .attr('fill', strokeColor)
+                        .attr('opacity', 0);
+                    setTimeout(() => dot.attr('opacity', 1), 460);
+                    const period = 2400;
+                    function step() {
+                        if (!node.isConnected) return;
+                        const t0 = (Date.now() % period) / period;
+                        const pt = node.getPointAtLength(t0 * totalLen);
+                        dot.attr('transform', `translate(${pt.x},${pt.y})`);
+                        requestAnimationFrame(step);
+                    }
+                    requestAnimationFrame(step);
+                }
+
+                // Edge label — defer measurement to next rAF (getBBox returns 0 before paint)
+                const labelGroup = eg.append('g').attr('class', 'edge-label');
+                const labelBg = labelGroup.append('rect')
+                    .attr('class', 'edge-label-bg')
+                    .attr('rx', 3)
+                    .attr('fill', '#0f172a');
+                const textWrap = labelGroup.append('g');
+                textWrap.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'auto')
+                    .attr('y', -3)
+                    .attr('fill', '#e2e8f0')
+                    .attr('font-size', '11px')
+                    .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                    .text(edge.role);
+                textWrap.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'hanging')
+                    .attr('y', 4)
+                    .attr('fill', '#64748b')
+                    .attr('font-size', '9px')
+                    .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                    .text(edge.protocol);
+
+                // Position label at dagre's reserved label slot — it accounts for
+                // adjacent edges so labels don't overlap.
+                const labelCx = Number.isFinite(edge._labelX) ? edge._labelX : (s.x + t.x) / 2;
+                const labelCy = Number.isFinite(edge._labelY) ? edge._labelY : (s.y + t.y) / 2;
+                labelGroup.attr('transform', `translate(${labelCx},${labelCy})`);
+                requestAnimationFrame(() => {
+                    try {
+                        const bb = textWrap.node().getBBox();
+                        labelBg
+                            .attr('x', bb.x - 6)
+                            .attr('y', bb.y - 3)
+                            .attr('width', bb.width + 12)
+                            .attr('height', bb.height + 6);
+                    } catch (_) {
+                        labelBg.attr('x', -36).attr('y', -14).attr('width', 72).attr('height', 26);
+                    }
+                });
+
+
+                eg.on('mouseenter', function (event) {
+                    pathEl.attr('stroke', '#94a3b8').attr('stroke-width', strokeW + 1)
+                        .attr('marker-end', 'url(#arrow-hover)');
+                    showTooltip(edgeTooltipHtml(edge), event);
+                }).on('mousemove', (event) => {
+                    positionTooltip(event);
+                }).on('mouseleave', function () {
+                    pathEl.attr('stroke', strokeColor).attr('stroke-width', strokeW)
+                        .attr('marker-end', `url(#${markerId})`);
+                    hideTooltip();
+                }).on('click', function (event) {
+                    event.stopPropagation();
+                    hideTooltip();
+                    openEdgePanel(edge);
+                });
+            }
+
+            // ── Nodes ──────────────────────────────────────────────────────────
+            const nodeGroup = zoomGroup.append('g').attr('class', 'nodes');
+            const nodeGroupSels = [];
+            const sortedNodes = [...nodes].sort((a, b) => a.x - b.x);
+
+            for (let i = 0; i < sortedNodes.length; i++) {
+                const node = sortedNodes[i];
+                const isSpire = node.isSpire || SPIRE_NODE_IDS.includes(node.id);
+                const baseClass = 'node-group'
+                    + (node.isPing         ? ' is-ping'         : '')
+                    + (isSpire             ? ' is-spire'        : '')
+                    + (!node.isPing && !isSpire && node.isAgentRuntime ? ' is-agent-runtime' : '')
+                    + (node.isBackend      ? ' is-backend'      : '');
+                const ng = nodeGroup.append('g')
+                    .attr('class', baseClass)
+                    .attr('data-base-class', baseClass)
+                    .attr('data-node-id', node.id)
+                    .attr('transform', `translate(${node.x},${node.y})`)
+                    .style('cursor', 'pointer')
+                    .attr('opacity', 0);
+                nodeGroupSels.push(ng.node());
+                const isInbound  = node.label === 'Envoy Inbound';
+                const isOutbound = node.label === 'Envoy Outbound';
+                const isIdentity = node.label === 'Identity Sidecar';
+                const fillColor  = node.isPing   ? '#1e3a5f'
+                                 : isSpire        ? '#0d2e2b'
+                                 : isInbound      ? '#0c2a4a'
+                                 : isOutbound     ? '#1a1a3e'
+                                 : isIdentity     ? '#1e1b33'
+                                 : node.isAgentRuntime ? '#1a0a2e'
+                                 : node.isBackend      ? '#0f2920'
+                                 : '#1e293b';
+                const strokeColor = node.isPing  ? '#3b82f6'
+                                  : isSpire       ? '#14b8a6'
+                                  : isInbound     ? '#38bdf8'
+                                  : isOutbound    ? '#818cf8'
+                                  : isIdentity    ? '#a78bfa'
+                                  : node.isAgentRuntime ? '#c084fc'
+                                  : node.isBackend      ? '#10b981'
+                                  : '#334155';
+
+                const rect = ng.append('rect')
+                    .attr('class', 'node-rect')
+                    .attr('width', node._w)
+                    .attr('height', node._h)
+                    .attr('rx', 8)
+                    .attr('fill', fillColor)
+                    .attr('stroke', strokeColor)
+                    .attr('stroke-width', 1.5);
+
+                // FA icon via foreignObject (respects loaded FA CSS)
+                const iconSize = 22;
+                const iconFo = ng.append('foreignObject')
+                    .attr('x', 12)
+                    .attr('y', 0)
+                    .attr('width', iconSize)
+                    .attr('height', node._h);
+                iconFo.append('xhtml:div')
+                    .attr('class', 'node-icon-wrap')
+                    .append('xhtml:i')
+                    .attr('class', `fa-solid ${node.icon || 'fa-circle-nodes'}`);
+
+                const subLabel = resolveSubLabel(node);
+                const labelX = 12 + iconSize + 8;
+                const labelCenter = labelX + (node._w - labelX - 12) / 2;
+                const labelY = subLabel ? node._h / 2 - 7 : node._h / 2;
+
+                ng.append('text')
+                    .attr('x', labelCenter)
+                    .attr('y', labelY)
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'central')
+                    .attr('fill', '#f1f5f9')
+                    .attr('font-size', '13px')
+                    .attr('font-weight', '500')
+                    .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                    .text(node.label);
+
+                if (subLabel) {
+                    ng.append('text')
+                        .attr('x', labelCenter)
+                        .attr('y', labelY + 16)
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'central')
+                        .attr('fill', '#64748b')
+                        .attr('font-size', '10px')
+                        .attr('font-family', 'ui-sans-serif, system-ui, sans-serif')
+                        .text(subLabel);
+                }
+
+                // Status dot — top-right
+                const statusColor = STATUS_COLORS[node.aggregateStatus] || STATUS_COLORS.ok;
+                ng.append('circle')
+                    .attr('cx', node._w - 9)
+                    .attr('cy', 9)
+                    .attr('r', 4)
+                    .attr('fill', statusColor)
+                    .attr('stroke', '#0f172a')
+                    .attr('stroke-width', 1.5);
+
+                // Entry fade-in, staggered left-to-right
+                ng.transition()
+                    .delay(i * 50)
+                    .duration(220)
+                    .attr('opacity', 1);
+
+                if (node.isCollapsedCluster) {
+                    ng.style('cursor', 'default');
+                    ng.on('mouseenter', function (event) {
+                        rect.attr('stroke', node.isSpire ? '#2dd4bf' : '#c084fc').attr('stroke-width', 2);
+                    }).on('mouseleave', function () {
+                        rect.attr('stroke', strokeColor).attr('stroke-width', 1.5);
+                    });
+                } else {
+                    ng.on('mouseenter', function (event) {
+                        const hoverStroke = node.isPing  ? '#60a5fa'
+                                          : isSpire      ? '#2dd4bf'
+                                          : isInbound    ? '#7dd3fc'
+                                          : isOutbound   ? '#a5b4fc'
+                                          : isIdentity   ? '#c4b5fd'
+                                          : node.isAgentRuntime ? '#d8b4fe'
+                                          : node.isBackend      ? '#34d399'
+                                          : '#64748b';
+                        rect.attr('stroke', hoverStroke).attr('stroke-width', 2);
+                        showTooltip(nodeTooltipHtml(node), event);
+                    }).on('mousemove', (event) => {
+                        positionTooltip(event);
+                    }).on('mouseleave', function () {
+                        rect.attr('stroke', strokeColor).attr('stroke-width', 1.5);
+                        hideTooltip();
+                    }).on('click', function (event) {
+                        event.stopPropagation();
+                        hideTooltip();
+                        openNodePanel(node);
+                    });
+                }
+            }
+
+            _allNodeGroups = D3Graph.select('#zoom-group').selectAll('g.node-group');
+            _allEdgeGroups = D3Graph.select('#zoom-group').selectAll('g.edge-group');
+
+            // ── Zoom (deferred to rAF so clientWidth/Height are real) ──────────
+            const zoomBehavior = D3Graph.zoom()
+                .scaleExtent([0.25, 3])
+                .on('zoom', (event) => {
+                    zoomGroup.attr('transform', event.transform);
+                });
+            _zoomBehavior = zoomBehavior;
+
+            requestAnimationFrame(() => {
+                const svgW = svgEl.clientWidth || window.innerWidth;
+                const svgH = svgEl.clientHeight || (window.innerHeight - 60);
+                const scale = Math.min(1, (svgW / graphW) * 0.9, (svgH / graphH) * 0.9);
+                const tx = (svgW - graphW * scale) / 2 - minX * scale;
+                const ty = (svgH - graphH * scale) / 2 - minY * scale;
+                _initialTransform = D3Graph.zoomIdentity.translate(tx, ty).scale(scale);
+                D3Graph.select(svgEl)
+                    .call(zoomBehavior)
+                    .call(zoomBehavior.transform, _initialTransform);
+            });
+        }
+
+        // ── Collapse / expand + SPIRE visibility state ────────────────────────────
+        let _isCollapsed = true;
+        // SPIFFE/SPIRE infrastructure is hidden by default — the primary view is the
+        // business flow; revealing the identity fabric is an explicit opt-in. State is
+        // in-memory only (resets on reload), mirroring _isCollapsed.
+        let _hideSpire = true;
+        let _traceData = null;
+
+        function _updateCollapseButton() {
+            const icon = document.getElementById('collapse-icon');
+            const label = document.getElementById('collapse-label');
+            if (_isCollapsed) {
+                icon.className = 'fa-solid fa-expand';
+                label.textContent = 'Expand';
+            } else {
+                icon.className = 'fa-solid fa-compress';
+                label.textContent = 'Collapse';
+            }
+        }
+
+        function _updateSpireButton() {
+            const label = document.getElementById('spire-label');
+            label.textContent = _hideSpire ? 'Show SPIFFE / SPIRE' : 'Hide SPIFFE / SPIRE';
+        }
+
+        function renderCurrent() {
+            if (!_traceData) return;
+            const graph = _isCollapsed
+                ? traceGraph.buildCollapsedGraph(_traceData, { hideSpire: _hideSpire })
+                : traceGraph.buildGraph(_traceData, { intraPod: true, hideSpire: _hideSpire });
+            render(graph);
+        }
+
+        document.getElementById('collapse-toggle').addEventListener('click', () => {
+            _isCollapsed = !_isCollapsed;
+            _updateCollapseButton();
+            closeDetailPanel();
+            renderCurrent();
+        });
+
+        document.getElementById('spire-toggle').addEventListener('click', () => {
+            _hideSpire = !_hideSpire;
+            _updateSpireButton();
+            closeDetailPanel();
+            renderCurrent();
+        });
+
+        // ── Bootstrap ────────────────────────────────────────────────────────────
+        const traceId = new URLSearchParams(window.location.search).get('trace');
+        if (!traceId) {
+            document.getElementById('empty-state').classList.remove('hidden');
+        } else {
+            fetch(`/workforce-portal/trace-raw/${traceId}`, { credentials: 'same-origin' })
+                .then(res => res.ok ? res.json() : Promise.reject(res.status))
+                .then(jaegerTrace => {
+                    const traceData = jaegerTrace?.data?.[0];
+                    if (!traceData || !traceData.spans?.length) {
+                        document.getElementById('empty-state').classList.remove('hidden');
+                        return;
+                    }
+                    _traceData = traceData;
+                    _isCollapsed = true;
+                    _hideSpire = true;
+                    _updateCollapseButton();
+                    _updateSpireButton();
+                    renderCurrent();
+                })
+                .catch(() => document.getElementById('empty-state').classList.remove('hidden'));
+        }
+    })();
+    </script>
+</body>
+</html>

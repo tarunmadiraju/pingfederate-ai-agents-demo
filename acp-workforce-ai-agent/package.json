@@ -1,0 +1,39 @@
+{
+  "name": "acp-workforce-ai-agent",
+  "version": "1.0.0",
+  "description": "Workforce AI Agent with OAuth 2.0 Token Exchange for MCP Server access",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/eventEmitter.test.js test/stateManager.test.js test/interruptStore.test.js test/interruptError.test.js"
+  },
+  "keywords": [
+    "oauth",
+    "token-exchange",
+    "mcp",
+    "ai-agent",
+    "workforce"
+  ],
+  "author": "Ping Identity",
+  "license": "MIT",
+  "dependencies": {
+    "@ag-ui/core": "0.0.53",
+    "@ag-ui/encoder": "0.0.53",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.1",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "rxjs": "7.8.1",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

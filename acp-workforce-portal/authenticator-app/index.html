@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Authenticator">
+    <meta name="theme-color" content="#4f46e5">
+    <title>Acme Corp - Authenticator</title>
+    <link rel="manifest" href="/authenticator-app/manifest.json">
+    <link rel="apple-touch-icon" href="/authenticator-app/icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Cpath d='M16 48V20l16-8 16 8v28H36V36h-8v12H16z' fill='white'/%3E%3Crect x='24' y='24' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='34' y='24' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='24' y='34' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='34' y='34' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* iOS safe area — only horizontal + bottom; top is on the nav bar */
+        body {
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Animations */
+        @keyframes slide-in {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slide-out {
+            from { opacity: 1; transform: translateY(0); }
+            to   { opacity: 0; transform: translateY(-20px); }
+        }
+        @keyframes pulse-shield {
+            0%, 100% { transform: scale(1); opacity: 0.6; }
+            50%      { transform: scale(1.08); opacity: 1; }
+        }
+        .animate-slide-in  { animation: slide-in 0.3s ease-out forwards; }
+        .animate-slide-out { animation: slide-out 0.3s ease-in forwards; }
+        .animate-pulse-shield { animation: pulse-shield 3s ease-in-out infinite; }
+
+        /* Active button press effect */
+        .consent-btn:active {
+            transform: scale(0.97);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- ─── Navigation bar (matches portal) ────────────────────────────── -->
+    <nav class="bg-white shadow-sm border-b sticky top-0 z-40" style="padding-top: env(safe-area-inset-top)">
+        <div class="max-w-lg mx-auto px-4">
+            <div class="flex justify-between h-14 items-center">
+                <div class="flex items-center">
+                    <i class="fa-solid fa-building text-indigo-600 text-xl mr-2.5"></i>
+                    <span class="font-bold text-lg text-gray-800">Acme Corp</span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <!-- User avatar with dropdown menu -->
+                    <div id="user-avatar-wrapper" class="relative hidden">
+                        <div id="user-avatar" class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-sm font-semibold cursor-pointer select-none" onclick="toggleUserMenu()"></div>
+                        <div id="user-menu" class="hidden absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-100 z-50 overflow-hidden">
+                            <div class="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                                <p id="menu-user-name" class="text-sm font-semibold text-gray-800"></p>
+                                <p id="menu-user-email" class="text-xs text-gray-500 mt-0.5"></p>
+                            </div>
+                            <div class="py-1">
+                                <a href="https://portal-external.localhost/workforce-portal"
+                                   class="flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                                    <i class="fa-solid fa-comments text-indigo-500 mr-3 w-4 text-center"></i>
+                                    Workforce Portal
+                                    <i class="fa-solid fa-arrow-up-right-from-square text-gray-300 ml-auto text-xs"></i>
+                                </a>
+                            </div>
+                            <div class="border-t border-gray-100">
+                                <button onclick="window.location.href='/authenticator-app/logout'" class="flex items-center w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                                    <i class="fa-solid fa-right-from-bracket text-gray-400 mr-3 w-4 text-center"></i>
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ─── App header ─────────────────────────────────────────────────── -->
+    <div class="bg-white border-b">
+        <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center">
+                <i class="fa-solid fa-shield-halved text-indigo-600 mr-2.5 leading-none"></i>
+                <h1 class="font-semibold text-gray-800 leading-none">Authenticator App</h1>
+            </div>
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-1.5 text-xs text-gray-400">
+                    <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-300"></div>
+                    <span id="status-label">Connecting</span>
+                </div>
+                <span id="request-count" class="hidden bg-amber-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Screen: Loading ────────────────────────────────────────────── -->
+    <div id="screen-loading" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+            <i class="fa-solid fa-spinner fa-spin text-indigo-400 text-3xl mb-4"></i>
+            <p class="text-gray-500 text-sm">Connecting...</p>
+        </div>
+    </div>
+
+    <!-- ─── Screen: Main app ───────────────────────────────────────────── -->
+    <div id="screen-app" class="flex-1 flex flex-col hidden">
+        <!-- Request cards -->
+        <div id="requests-container" class="max-w-lg mx-auto w-full pt-4 overflow-y-auto">
+            <!-- Consent cards inserted here by app.js -->
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="max-w-lg mx-auto w-full flex-1 flex items-center justify-center">
+            <div class="text-center">
+                <div class="w-20 h-20 mx-auto mb-5 rounded-full bg-gray-200 flex items-center justify-center animate-pulse-shield">
+                    <i class="fa-solid fa-shield-halved text-gray-400 text-3xl"></i>
+                </div>
+                <h3 class="font-semibold text-gray-700 mb-1">No Pending Requests</h3>
+                <p class="text-sm text-gray-400">Approval requests from AI agents will appear here.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Service worker + app ───────────────────────────────────────── -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/authenticator-app/sw.js').catch(() => {});
+        }
+    </script>
+    <script src="/authenticator-app/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acme Corp - Workforce Portal</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Cpath d='M16 48V20l16-8 16 8v28H36V36h-8v12H16z' fill='white'/%3E%3Crect x='24' y='24' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='34' y='24' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='24' y='34' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3Crect x='34' y='34' width='6' height='6' rx='1' fill='%234f46e5'/%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <i class="fa-solid fa-building text-indigo-600 text-2xl mr-3"></i>
+                    <span class="font-bold text-xl text-gray-800">Acme Corp</span>
+                </div>
+                <div class="flex items-center">
+                    <a href="/workforce-portal"
+                       class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-medium transition-colors text-sm">
+                        <i class="fa-solid fa-right-to-bracket mr-2"></i>Sign In
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <main class="flex-1 flex flex-col">
+        <div class="flex-1 flex flex-col items-center justify-center px-4 py-16">
+            <!-- Hero -->
+            <div class="text-center max-w-3xl mb-16">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-2xl mb-6">
+                    <i class="fa-solid fa-receipt text-3xl text-indigo-600"></i>
+                </div>
+                <h1 class="text-5xl font-bold text-gray-900 mb-4">Acme Corp Workforce Portal</h1>
+                <p class="text-xl text-gray-500 max-w-xl mx-auto">
+                    Manage expenses, travel, and everything in between — all in one place.
+                </p>
+            </div>
+
+            <!-- Feature Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full mb-16">
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                    <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
+                        <i class="fa-solid fa-comments text-indigo-600"></i>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 mb-2">Digital Assistant</h3>
+                    <p class="text-sm text-gray-500">Your AI-powered assistant for day-to-day workplace requests — from expenses to travel and beyond.</p>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                    <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center mb-4">
+                        <i class="fa-solid fa-file-invoice-dollar text-emerald-600"></i>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 mb-2">Expenses & Budgets</h3>
+                    <p class="text-sm text-gray-500">Submit expense reports, track approvals, and monitor your department budget at a glance.</p>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                    <div class="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center mb-4">
+                        <i class="fa-solid fa-plane text-sky-600"></i>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 mb-2">Travel Assistant</h3>
+                    <p class="text-sm text-gray-500">Book trips, manage travel requests, and stay within your travel policy — effortlessly.</p>
+                </div>
+            </div>
+
+            <!-- CTA -->
+            <a href="/workforce-portal"
+               class="inline-flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-semibold text-lg transition-colors shadow-md">
+                <i class="fa-solid fa-right-to-bracket mr-3"></i>Sign In to Get Started
+            </a>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <p class="text-center text-gray-400 text-sm">
+                &copy; 2026 Acme Corp. All rights reserved.
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

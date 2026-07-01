@@ -1,0 +1,66 @@
+# Authn Sidecar configuration for the Workforce AI Agent
+#
+# Inbound: Envoy ext_proc gRPC (:9010) — header rewrite + actor SVID injection
+# Outbound: CIBA step-up HTTP proxy (:15002) — consent flow on 403
+
+spiffe:
+  endpointSocket: "unix:///spiffe-workload-api/spire-agent.sock"
+
+extProc:
+  listenAddr: ":9010"
+  subjectTokenHeader: "Authorization"
+  actorToken:
+    source: "jwt-svid"
+    audience: "https://pingfed.localhost"
+  headersToUpstream:
+    - header: "X-Subject-Token"
+      source: subject_token
+      append: false
+    - header: "Authorization"
+      source: actorToken
+      format: "Bearer {value}"
+      append: false
+  dynamicMetadata:
+    subject: true
+    actorSpiffeId: true
+
+# Egress proxy (always-on, independent of CIBA). The Workforce AI Agent only
+# ever calls MCP servers via PingGateway, so the allowlist is the single fixed
+# host. proxy.tls.skipVerify accepts the demo *.localhost certs (was previously
+# ciba.tls.skipVerify, which fed this same proxy transport).
+proxy:
+  listenAddr: ":15002"
+  allowedUpstreams:
+    - "pinggateway.localhost"
+  tls:
+    skipVerify: true
+
+ciba:
+  enabled: true
+  backchannelAuthEndpoint: "https://pingfed.localhost/as/bc-auth.ciba"
+  tokenEndpoint: "https://pingfed.localhost/as/token.oauth2"
+  bindingMessage: "Human-In-The-Loop"
+  resourceAudienceMap:
+    /expense: "https://acp-expense-mcp.localhost"
+    /travel: "https://acp-travel-mcp.localhost"
+  onApproval:
+    headersToUpstream:
+      - header: "Authorization"
+        format: "Bearer {value}"
+    headersToDownstream:
+      - header: "X-Ciba-Token"
+  pollInterval: 2
+  tls:
+    skipVerify: true
+  cache:
+    maxEntries: 10000
+    cleanupInterval: 30
+    ttlBuffer: 10
+  auth:
+    method: "private_key_jwt"
+    clientId: "spiffe://demo.spiffe.io/ns/ai-agents/sa/workforce-ai-agent"
+    privateKeyJwt:
+      source: "x509-svid"
+      audience: "https://pingfed.localhost/as/token.oauth2"
+      lifetime: 60
+      clockSkew: 5

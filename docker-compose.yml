@@ -1,0 +1,140 @@
+version: '3.9'
+
+services:
+  # PingFederate - Identity Provider
+  pingfederate:
+    image: pingidentity/pingfederate:${PINGFEDERATE_VERSION:-11.4.3}
+    container_name: pingfederate
+    environment:
+      PING_IDENTITY_DEVOPS_USER: ${PING_IDENTITY_DEVOPS_USER}
+      PING_IDENTITY_DEVOPS_KEY: ${PING_IDENTITY_DEVOPS_KEY}
+      PING_IDENTITY_DEVOPS_TAG: ${PING_IDENTITY_DEVOPS_TAG:-}
+      SERVER_PROFILE_URL: https://github.com/pingidentity/server-profiles.git
+      SERVER_PROFILE_PATH: getting-started/pingfederate
+    ports:
+      - "9999:9999"
+      - "9031:9031"
+    volumes:
+      - pingfederate-data:/opt/out
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/pf/heartbeat.ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PingAccess - BFF / Session Manager
+  pingaccess:
+    image: pingidentity/pingaccess:${PINGACCESS_VERSION:-7.4.3}
+    container_name: pingaccess
+    environment:
+      PING_IDENTITY_DEVOPS_USER: ${PING_IDENTITY_DEVOPS_USER}
+      PING_IDENTITY_DEVOPS_KEY: ${PING_IDENTITY_DEVOPS_KEY}
+      PA_ADMIN_PASSWORD: ${PA_ADMIN_PASSWORD:-2FederateM0re}
+    ports:
+      - "3000:3000"
+      - "9090:9090"
+    depends_on:
+      - pingfederate
+    volumes:
+      - pingaccess-data:/opt/out
+    networks:
+      - ping-network
+
+  # Ollama - LLM Backend
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Workforce Portal
+  workforce-portal:
+    build:
+      context: ./acp-workforce-portal
+      dockerfile: Dockerfile
+    container_name: acp-workforce-portal
+    ports:
+      - "3001:3000"
+    environment:
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-http://pingfederate:9999/oauth/.well-known/openid-configuration}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-portal}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-secret}
+      WORKFORCE_AGENT_URL: http://workforce-agent:3001/api/agent
+      TRIP_PLANNER_URL: http://trip-planner:8080/api/trip-planner
+      NODE_ENV: development
+    depends_on:
+      - pingfederate
+      - pingaccess
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Workforce AI Agent
+  workforce-agent:
+    build:
+      context: ./acp-workforce-ai-agent
+      dockerfile: Dockerfile
+    container_name: acp-workforce-agent
+    ports:
+      - "3002:3001"
+    environment:
+      LOG_LEVEL: info
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+    depends_on:
+      - ollama
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Trip Planner Agent
+  trip-planner:
+    build:
+      context: ./acp-trip-planner-agent
+      dockerfile: Dockerfile
+    container_name: acp-trip-planner-agent
+    ports:
+      - "8081:8080"
+    environment:
+      LOG_LEVEL: info
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+    depends_on:
+      - ollama
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  ping-network:
+    driver: bridge
+
+volumes:
+  pingfederate-data:
+  pingaccess-data:
+  ollama-data:

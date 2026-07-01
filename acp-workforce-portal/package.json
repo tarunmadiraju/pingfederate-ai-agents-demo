@@ -1,0 +1,30 @@
+{
+  "name": "acp-workforce-portal",
+  "version": "1.0.0",
+  "description": "Workforce Portal — static frontend served by Express behind PingAccess",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.mjs",
+    "build:otel": "esbuild browser-otel/entrypoint.js --bundle --format=iife --global-name=OtelBrowser --outfile=js/otel-bundle.js --minify --target=es2020 --platform=browser",
+    "build:graph": "npx esbuild browser-graph/entrypoint.js --bundle --format=iife --global-name=D3Graph --minify --outfile=js/d3-bundle.js"
+  },
+  "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "d3": "^7.9.0",
+    "dagre": "^0.8.5",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.6.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.214.0",
+    "@opentelemetry/resources": "^2.6.1",
+    "@opentelemetry/sdk-trace-base": "^2.6.1",
+    "@opentelemetry/sdk-trace-web": "^2.6.1",
+    "esbuild": "^0.28.0"
+  }
+}

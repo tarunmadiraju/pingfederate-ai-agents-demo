@@ -1,0 +1,17 @@
+# IngressRoute for Workforce Portal backend (HTTPS)
+# Hostname: portal-internal.localhost — used by PingAccess to reach this server.
+# The browser never hits this directly; it goes through PA at portal-external.localhost.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: acp-workforce-portal
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`portal-internal.localhost`)
+      kind: Rule
+      services:
+        - name: acp-workforce-portal
+          port: 3000
+  tls: {}
